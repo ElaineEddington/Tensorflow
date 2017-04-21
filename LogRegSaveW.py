@@ -1,98 +1,64 @@
-'''
-A logistic regression learning algorithm example using TensorFlow library.
-This example is using the MNIST database of handwritten digits
-(http://yann.lecun.com/exdb/mnist/)
-
-Author: Aymeric Damien
-Project: https://github.com/aymericdamien/TensorFlow-Examples/
-'''
 
 from __future__ import print_function
 
 import tensorflow as tf
+tf.GraphKeys.VARIABLES = tf.GraphKeys.GLOBAL_VARIABLES
+import random
+import sys
+import numpy as np
+from LogReg import accuracy
+from LogReg import W
+from LogReg import x,y
+
 
 # Import MNIST data
 from tensorflow.examples.tutorials.mnist import input_data
 mnist = input_data.read_data_sets("/tmp/data/", one_hot=True)
 
-# Parameters
-learning_rate = 0.01
-training_epochs = 20
-batch_size = 100
-display_step = 1
 
-# tf Graph Input
-x = tf.placeholder(tf.float32, [None, 784])  # mnist data image of shape 28*28=784
-y = tf.placeholder(tf.float32, [None, 10])  # 0-9 digits recognition => 10 classes
+def restore(model_file):
 
-# Set model weights
-W = tf.Variable(tf.zeros([784, 10]))
-b = tf.Variable(tf.zeros([10]))
+    with tf.Session() as sess:
 
+        new_saver = tf.train.import_meta_graph(model_file + ".meta")
+        new_saver.restore(sess, model_file)
 
-# Construct model
-pred = tf.nn.softmax(tf.matmul(x, W) + b)   # Softmax
+        with tf.variable_scope("foo", reuse=True):
 
-# Minimize error using cross entropy
-cost = tf.reduce_mean(-tf.reduce_sum(y*tf.log(pred), reduction_indices=1))
-# Gradient Descent
-optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
+            temp_var = tf.get_variable("W")
+            size_2a = tf.get_variable("b")
+            s1 = tf.shape(temp_var).eval()[0]
+            s2 = tf.shape(size_2a).eval()[0]
 
-# Initializing the variables
-init_op = tf.global_variables_initializer()
-saver = tf.train.Saver()
+            print("W_old", temp_var.eval())
+            ones_mask = tf.ones([s1,s2])
+            indices = tf.slice(ones_mask,[0,0],[s1/2,s2/2])
 
-# Launch the graph
-with tf.Session() as sess:
-    sess.run(init_op)
+            # turn 'ones_mask' into 1d variable since "scatter_update" supports linear indexing only
+            ones_flat = tf.Variable(tf.reshape(ones_mask, [-1]))
+            indices_flat = tf.Variable(tf.reshape(indices, [-1]))
 
-    # Training cycle
-    for epoch in range(training_epochs):
-        avg_cost = 0.
-        total_batch = int(mnist.train.num_examples/batch_size)
-        # Loop over all batches
-        for i in range(total_batch):
-            batch_xs, batch_ys = mnist.train.next_batch(batch_size)
-            # Run optimization op (backprop) and cost op (to get loss value)
-            _, c = sess.run([optimizer, cost], feed_dict={x: batch_xs,
-                                                          y: batch_ys})
-            # Compute average loss
-            avg_cost += c / total_batch
-        # Display logs per epoch step
-        if (epoch+1) % display_step == 0:
-            print("Epoch:", '%04d' % (epoch+1), "cost=", "{:.9f}".format(avg_cost))
+            # get linear indices
+            linear_indices = tf.random_uniform(tf.shape(indices_flat), dtype=tf.int32, minval=0, maxval =s1*s2-1)
+            print("lin_ind",linear_indices)
+            # no automatic promotion, so make updates float32 to match ones_mask
+            updates = tf.zeros(shape=(tf.shape(linear_indices)), dtype=tf.float32)
 
-    print("Optimization Finished!")
+            ones_flat_new = tf.scatter_update(ones_flat,linear_indices, updates)
 
-    # Test model
-    correct_prediction = tf.equal(tf.argmax(pred, 1), tf.argmax(y, 1))
-    # Calculate accuracy
-    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+            # convert back into original shape
+            ones_mask_new = tf.reshape(ones_flat_new, ones_mask.get_shape())
 
-    # Save the variables to disk.
+            W.assign(tf.multiply(W,ones_mask_new))
 
-    save_path = saver.save(sess,"/Users/mac/PycharmProjects/untitled1/MyModel",write_meta_graph=True)
-    print("Model saved in file: %s" % save_path)
-    print("Accuracy_old:", accuracy.eval({x: mnist.test.images, y: mnist.test.labels}))
+            print("W_new", W.eval())
 
-    new_saver = tf.train.import_meta_graph('MyModel.meta')
-    new_saver.restore(sess, tf.train.latest_checkpoint('./'))
-    all_vars = tf.get_collection('vars')
-    for v in all_vars:
-        v_ = sess.run(v)
-        print(v_)
+            init_op = tf.global_variables_initializer()
+            sess.run(init_op)
+            new_saver.save(sess, model_file)
 
-    #Zeroes = tf.mul(tf.zeros([784, 10]),Rand)
+            print("Accuracy_new:", accuracy.eval({x: mnist.test.images, y: mnist.test.labels}))
 
-    #assign_op = W.assign(tf.mul(W, Rand)
+restore('./MyModel2')
 
-    ones_mask = tf.Variable(tf.ones([784, 10]))
-    index_num= tf.Variable(tf.random_uniform([784,]))
-    indexNum= tf.cast(index_num, tf.int64)
-    update = tf.scatter_update(ones_mask, indexNum, tf.zeros([784,10]))
-
-    assign_op = W.assign(tf.mul(W, update))
-    sess.run(tf.global_variables_initializer())
-    sess.run(assign_op)
-    print("Accuracy_new:", accuracy.eval({x: mnist.test.images, y: mnist.test.labels}))
 
